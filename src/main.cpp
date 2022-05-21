@@ -1,27 +1,64 @@
 #include <Arduino.h>
+
+
+// Camera includes -------------------------------------
 #include "esp_camera.h"
 #include "camera_pins.h"
-#include <WiFi.h>
-#include <ArduinoWebsockets.h>
+// -----------------------------------------------------
 
+
+// WiFi includes ---------------------------------------
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include "esp_wpa2.h"
 #include "secure_wifi.h"
+// -----------------------------------------------------
+
+
+// Connectivity ----------------------------------------
+#include <ArduinoWebsockets.h>
+#include <esp_now.h>
+// -----------------------------------------------------
+
 
 using namespace websockets;
 
-// const char* ssid = "Device-Northwestern";
+// WiFi and server -------------------------------------
 const char* ssid = "eduroam";
 const char* path = "/cam";
 const char* host = "10.105.195.71";
 const size_t port = 420;
+// -----------------------------------------------------
 
+
+// camera frame rates ----------------------------------
 const size_t frame_rate = 40;
 const size_t interval = 1000 / frame_rate;
 unsigned long prev_time = 0;
+// -----------------------------------------------------
+
 
 bool cam_on = false;
 bool take_photo = false;
+
+// button stuff ---------------------------------------
+const int buttonPin = 2;
+int pressed_curr = 0;
+int pressed_prev = 0;
+// -----------------------------------------------------
+
+// ESP Now ---------------------------------------------
+// ESP32 MAC address: AC-67-B2-38-2E-8C
+uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x38, 0x2E, 0x8C};    
+
+int myData = 0;
+esp_now_peer_info_t peerInfo;
+
+void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nSend Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+} 
+// -----------------------------------------------------
 
 // WebSocket callbacks ---------------------------------
 void OnMessageCallback(WebsocketsMessage msg) {
@@ -57,11 +94,65 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 }
 // -----------------------------------------------------
 
+
 WebsocketsClient client;
-WiFiClientSecure wifi;
 void setup() {
   Serial.begin(115200);
   client.close();
+
+  // Connect to WiFi -------------------------------------
+  WiFi.mode(WIFI_STA);
+  esp_wifi_sta_wpa2_ent_set_identity((uint8_t*) EAP_ANONYMOUS_IDENTITY, strlen(EAP_ANONYMOUS_IDENTITY)); //provide identity
+  esp_wifi_sta_wpa2_ent_set_username((uint8_t*) EAP_IDENTITY, strlen(EAP_IDENTITY)); //provide username
+  esp_wifi_sta_wpa2_ent_set_password((uint8_t*) EAP_PASSWORD, strlen(EAP_PASSWORD)); //provide password
+  esp_wifi_sta_wpa2_ent_enable();
+
+  WiFi.begin(ssid);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  // -----------------------------------------------------
+
+
+  // ESP NOW ---------------------------------------------
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  esp_now_register_send_cb(OnDataSent);
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+  // -----------------------------------------------------
+  
+
+  // Setup Callbacks--------------------------
+    client.onMessage(OnMessageCallback);
+    client.onEvent(onEventsCallback);
+  // -----------------------------------------
+
+
+  // Connect to server------------------------------------
+  if (client.connect(host, port, path)) {
+    Serial.println("photo Host connected"); 
+  } 
+  else {
+    Serial.println("photo Host connection failed");
+  }
+  // -----------------------------------------------------
+
 
   // Camera config -------------------------------------
   camera_config_t config;
@@ -105,39 +196,6 @@ void setup() {
   }
   // ------------------------------------------------
 
-  // Connect to WiFi --------------------------------
-  WiFi.mode(WIFI_STA);
-  esp_wifi_sta_wpa2_ent_set_identity((uint8_t*) EAP_ANONYMOUS_IDENTITY, strlen(EAP_ANONYMOUS_IDENTITY)); //provide identity
-  esp_wifi_sta_wpa2_ent_set_username((uint8_t*) EAP_IDENTITY, strlen(EAP_IDENTITY)); //provide username
-  esp_wifi_sta_wpa2_ent_set_password((uint8_t*) EAP_PASSWORD, strlen(EAP_PASSWORD)); //provide password
-  esp_wifi_sta_wpa2_ent_enable();
-
-  WiFi.begin(ssid);
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(500);
-  }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  // ------------------------------------------------
-
-  // Connect to server-------------------------------
-  if (client.connect(host, port, path)) {
-    Serial.println("photo Host connected"); 
-  } 
-  else {
-    Serial.println("photo Host connection failed");
-    while(1) {}
-  }
-  // ------------------------------------------------
-
-  // Setup Callbacks---------------------------------
-    client.onMessage(OnMessageCallback);
-    client.onEvent(onEventsCallback);
-  // ------------------------------------------------
 
   // Init camera ------------------------------------
   esp_err_t err = esp_camera_init(&config);
@@ -147,51 +205,65 @@ void setup() {
   }
   // ------------------------------------------------
 
+
   // Camera settings --------------------------------
   sensor_t* s = esp_camera_sensor_get();
   s->set_contrast(s, 2);
   s->set_saturation(s, 0);
   // ------------------------------------------------
+
+
+  // button stuff -----------------------------------
+  pinMode(buttonPin, INPUT);
+  // ------------------------------------------------
 }
 
 void loop() {
+  if (!client.available()) {
+    if (client.connect(host, port, path)) {
+      Serial.println("photo Host connected"); 
+    } 
+  }
+
   client.poll();
   unsigned long curr_time = millis();
+
+  // button stuff -----------------------------------
+  pressed_curr = digitalRead(buttonPin);
+  if (pressed_curr - pressed_prev > 0) {
+    Serial.println("Button pressed!");
+    client.send("button");
+
+    myData = 1;
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*) &myData, sizeof(myData));
+    Serial.println(result == ESP_OK ? "Successful send" : "Failed send");
+  }
+  pressed_prev = pressed_curr;
+  // ------------------------------------------------
+
 
   if (curr_time - prev_time > interval && cam_on) {
     prev_time = curr_time;
     
-    if (!client.available()) {
-      return;
-    }
-
     // Take a photo -----------------------------------
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Camera capture failed");
       return;
     }
-
-#ifdef DEBUG
-    Serial.println("Camera capture sucessful!");
-#endif
 
     client.sendBinary((char*) fb->buf, fb->len);
     esp_camera_fb_return(fb);
     // ------------------------------------------------
   }
 
-  if (take_photo)  {
+  if (take_photo) {
     // Take a photo -----------------------------------
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Camera capture failed");
       return;
     }
-
-#ifdef DEBUG
-    Serial.println("Camera capture sucessful!");
-#endif
 
     client.sendBinary((char*) fb->buf, fb->len);
     esp_camera_fb_return(fb);

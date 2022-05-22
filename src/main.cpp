@@ -84,6 +84,9 @@ void OnMessageCallback(WebsocketsMessage msg) {
   else if (strcmp(msg_data, "s1") == 0) {
     SendSound(1);
   }
+  else if (strcmp(msg_data, "s2") == 0) {
+    SendSound(2);
+  }
 }
 
 void onEventsCallback(WebsocketsEvent event, String data) {

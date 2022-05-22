@@ -37,18 +37,18 @@ const size_t interval = 1000 / frame_rate;
 unsigned long prev_time = 0;
 // -----------------------------------------------------
 
-
 bool cam_on = false;
 bool take_photo = false;
 
 // button stuff ---------------------------------------
-const int buttonPin = 2;
+const int buttonPin = 15;
 int pressed_curr = 0;
 int pressed_prev = 0;
 unsigned long button_time = 0;
 // 5 sec delay between consecutive button presses for anti-spam
 const size_t button_interval = 5000;  
 // -----------------------------------------------------
+
 
 // ESP Now ---------------------------------------------
 // ESP32 MAC address: AC-67-B2-38-2E-8C
@@ -86,6 +86,9 @@ void OnMessageCallback(WebsocketsMessage msg) {
   }
   else if (strcmp(msg_data, "s2") == 0) {
     SendSound(2);
+  }
+  else if (strcmp(msg_data, "s3") == 0) {
+    SendSound(3);
   }
 }
 
@@ -247,8 +250,6 @@ void loop() {
 
     Serial.println("Button pressed!");
     client.send("button");
-
-    SendSound(0);
   }
   pressed_prev = pressed_curr;
   // ------------------------------------------------

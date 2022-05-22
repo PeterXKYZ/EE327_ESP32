@@ -45,13 +45,14 @@ bool take_photo = false;
 const int buttonPin = 2;
 int pressed_curr = 0;
 int pressed_prev = 0;
+unsigned long button_time = 0;
+// 5 sec delay between consecutive button presses for anti-spam
+const size_t button_interval = 5000;  
 // -----------------------------------------------------
 
 // ESP Now ---------------------------------------------
 // ESP32 MAC address: AC-67-B2-38-2E-8C
 uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x38, 0x2E, 0x8C};    
-
-int myData = 0;
 esp_now_peer_info_t peerInfo;
 
 void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
@@ -59,6 +60,11 @@ void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 } 
 // -----------------------------------------------------
+
+void SendSound(int num) {
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*) &num, sizeof(num));
+  Serial.println(result == ESP_OK ? "Successful send" : "Failed send");
+}
 
 // WebSocket callbacks ---------------------------------
 void OnMessageCallback(WebsocketsMessage msg) {
@@ -74,6 +80,9 @@ void OnMessageCallback(WebsocketsMessage msg) {
   }
   else if (strcmp(msg_data, "photo") == 0) {
     take_photo = true;
+  }
+  else if (strcmp(msg_data, "s1") == 0) {
+    SendSound(1);
   }
 }
 
@@ -230,17 +239,16 @@ void loop() {
 
   // button stuff -----------------------------------
   pressed_curr = digitalRead(buttonPin);
-  if (pressed_curr - pressed_prev > 0) {
+  if (pressed_curr > pressed_prev && curr_time - button_time > button_interval) {
+    button_time = curr_time;
+
     Serial.println("Button pressed!");
     client.send("button");
 
-    myData = 1;
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*) &myData, sizeof(myData));
-    Serial.println(result == ESP_OK ? "Successful send" : "Failed send");
+    SendSound(0);
   }
   pressed_prev = pressed_curr;
   // ------------------------------------------------
-
 
   if (curr_time - prev_time > interval && cam_on) {
     prev_time = curr_time;

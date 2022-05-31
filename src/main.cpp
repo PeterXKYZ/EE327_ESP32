@@ -28,6 +28,7 @@ const char* ssid = "eduroam";
 const char* path = "/cam";
 const char* host = "10.105.195.71";
 const size_t port = 420;
+size_t wifi_counter = 0;
 // -----------------------------------------------------
 
 
@@ -50,13 +51,19 @@ const size_t button_interval = 5000;
 // -----------------------------------------------------
 
 
+// LED indication system -------------------------------
+const int wifiLED = 13;
+const int wsLED = 12;
+// -----------------------------------------------------
+
+
 // ESP Now ---------------------------------------------
 // ESP32 MAC address: AC-67-B2-38-2E-8C
 uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x38, 0x2E, 0x8C};    
 esp_now_peer_info_t peerInfo;
 
 void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nSend Status:\t");
+  Serial.print("Send Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 } 
 // -----------------------------------------------------
@@ -65,6 +72,7 @@ void SendSound(int num) {
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*) &num, sizeof(num));
   Serial.println(result == ESP_OK ? "Successful send" : "Failed send");
 }
+
 
 // WebSocket callbacks ---------------------------------
 void OnMessageCallback(WebsocketsMessage msg) {
@@ -110,10 +118,30 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 // -----------------------------------------------------
 
 
+void send_photo(WebsocketsClient& a_client) {
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  a_client.sendBinary((char*) fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+}
+
+
 WebsocketsClient client;
 void setup() {
   Serial.begin(115200);
   client.close();
+  wifi_counter = 0;
+
+  // LEDs setup ------------------------------------------
+  pinMode(wifiLED, OUTPUT);
+  pinMode(wsLED, OUTPUT);
+  digitalWrite(wifiLED, LOW);
+  digitalWrite(wsLED, LOW);
+  // -----------------------------------------------------
 
   // Connect to WiFi -------------------------------------
   WiFi.mode(WIFI_STA);
@@ -123,22 +151,31 @@ void setup() {
   esp_wifi_sta_wpa2_ent_enable();
 
   WiFi.begin(ssid);
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED && wifi_counter < 50) {
     Serial.print(".");
+    digitalWrite(wifiLED, LOW);
     delay(500);
+    digitalWrite(wifiLED, HIGH);
+    delay(500); 
+    ++wifi_counter;
   }
 
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    digitalWrite(wifiLED, HIGH);
+  }
+  else {
+    Serial.println("WiFi not connected");
+    digitalWrite(wifiLED, LOW);
+  }
   // -----------------------------------------------------
 
 
   // ESP NOW ---------------------------------------------
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
-    return;
   }
 
   esp_now_register_send_cb(OnDataSent);
@@ -148,10 +185,9 @@ void setup() {
 
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
     Serial.println("Failed to add peer");
-    return;
   }
   // -----------------------------------------------------
-  
+
 
   // Setup Callbacks--------------------------
     client.onMessage(OnMessageCallback);
@@ -160,11 +196,15 @@ void setup() {
 
 
   // Connect to server------------------------------------
-  if (client.connect(host, port, path)) {
-    Serial.println("photo Host connected"); 
-  } 
-  else {
-    Serial.println("photo Host connection failed");
+  if (WiFi.status() == WL_CONNECTED) {
+    if (client.connect(host, port, path)) {
+      Serial.println("photo Host connected"); 
+      digitalWrite(wsLED, HIGH);
+    } 
+    else {
+      Serial.println("photo Host connection failed");
+      digitalWrite(wsLED, LOW);
+    }
   }
   // -----------------------------------------------------
 
@@ -234,9 +274,18 @@ void setup() {
 }
 
 void loop() {
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    digitalWrite(wifiLED, LOW);
+    delay(500);
+    digitalWrite(wifiLED, HIGH);
+  }
+
   if (!client.available()) {
+    digitalWrite(wsLED, LOW);
     if (client.connect(host, port, path)) {
       Serial.println("photo Host connected"); 
+      digitalWrite(wsLED, HIGH);
     } 
   }
 
@@ -258,29 +307,14 @@ void loop() {
     prev_time = curr_time;
     
     // Take a photo -----------------------------------
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      return;
-    }
-
-    client.sendBinary((char*) fb->buf, fb->len);
-    esp_camera_fb_return(fb);
+    send_photo(client);
     // ------------------------------------------------
   }
 
   if (take_photo) {
     // Take a photo -----------------------------------
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      return;
-    }
-
-    client.sendBinary((char*) fb->buf, fb->len);
-    esp_camera_fb_return(fb);
+    send_photo(client);
     // ------------------------------------------------
-
     take_photo = false;
   }
 }

@@ -8,27 +8,24 @@
 
 
 // WiFi includes ---------------------------------------
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include "esp_wpa2.h"
-#include "secure_wifi.h"
+#include <bap_wifi.h>
+#include <secure_wifi.h>
+
+const char* ssid = "eduroam";
 // -----------------------------------------------------
 
 
 // Connectivity ----------------------------------------
-#include <ArduinoWebsockets.h>
-#include <esp_now.h>
+#include <bap_send.h>
 // -----------------------------------------------------
 
 
 using namespace websockets;
 
-// WiFi and server -------------------------------------
-const char* ssid = "eduroam";
+// Tornado server --------------------------------------
 const char* path = "/cam";
 const char* host = "10.105.195.71";
 const size_t port = 420;
-size_t wifi_counter = 0;
 // -----------------------------------------------------
 
 
@@ -59,7 +56,7 @@ const int wsLED = 12;
 
 // ESP Now ---------------------------------------------
 // ESP32 MAC address: AC-67-B2-38-2E-8C
-uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x38, 0x2E, 0x8C};    
+const uint8_t broadcastAddress[] = {0xAC, 0x67, 0xB2, 0x38, 0x2E, 0x8C};    
 esp_now_peer_info_t peerInfo;
 
 void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
@@ -68,10 +65,6 @@ void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
 } 
 // -----------------------------------------------------
 
-void SendSound(int num) {
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*) &num, sizeof(num));
-  Serial.println(result == ESP_OK ? "Successful send" : "Failed send");
-}
 
 
 // WebSocket callbacks ---------------------------------
@@ -90,13 +83,13 @@ void OnMessageCallback(WebsocketsMessage msg) {
     take_photo = true;
   }
   else if (strcmp(msg_data, "s1") == 0) {
-    SendSound(1);
+    SendSound(broadcastAddress, 1);
   }
   else if (strcmp(msg_data, "s2") == 0) {
-    SendSound(2);
+    SendSound(broadcastAddress, 2);
   }
   else if (strcmp(msg_data, "s3") == 0) {
-    SendSound(3);
+    SendSound(broadcastAddress, 3);
   }
 }
 
@@ -118,23 +111,12 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 // -----------------------------------------------------
 
 
-void send_photo(WebsocketsClient& a_client) {
-  camera_fb_t* fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Camera capture failed");
-    return;
-  }
-
-  a_client.sendBinary((char*) fb->buf, fb->len);
-  esp_camera_fb_return(fb);
-}
 
 
 WebsocketsClient client;
 void setup() {
   Serial.begin(115200);
   client.close();
-  wifi_counter = 0;
 
   // LEDs setup ------------------------------------------
   pinMode(wifiLED, OUTPUT);
@@ -142,6 +124,7 @@ void setup() {
   digitalWrite(wifiLED, LOW);
   digitalWrite(wsLED, LOW);
   // -----------------------------------------------------
+
 
   // Connect to WiFi -------------------------------------
   WiFi.mode(WIFI_STA);
@@ -151,25 +134,7 @@ void setup() {
   esp_wifi_sta_wpa2_ent_enable();
 
   WiFi.begin(ssid);
-  while (WiFi.status() != WL_CONNECTED && wifi_counter < 50) {
-    Serial.print(".");
-    digitalWrite(wifiLED, LOW);
-    delay(500);
-    digitalWrite(wifiLED, HIGH);
-    delay(500); 
-    ++wifi_counter;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(wifiLED, HIGH);
-  }
-  else {
-    Serial.println("WiFi not connected");
-    digitalWrite(wifiLED, LOW);
-  }
+  CheckConnection(wifiLED, true);
   // -----------------------------------------------------
 
 
@@ -274,12 +239,7 @@ void setup() {
 }
 
 void loop() {
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    digitalWrite(wifiLED, LOW);
-    delay(500);
-    digitalWrite(wifiLED, HIGH);
-  }
+  CheckConnection(wifiLED);
 
   if (!client.available()) {
     digitalWrite(wsLED, LOW);
@@ -307,13 +267,13 @@ void loop() {
     prev_time = curr_time;
     
     // Take a photo -----------------------------------
-    send_photo(client);
+    SendPhoto(client);
     // ------------------------------------------------
   }
 
   if (take_photo) {
     // Take a photo -----------------------------------
-    send_photo(client);
+    SendPhoto(client);
     // ------------------------------------------------
     take_photo = false;
   }

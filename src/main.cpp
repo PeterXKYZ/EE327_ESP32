@@ -19,7 +19,6 @@ const char* ssid = "eduroam";
 #include <bap_send.h>
 // -----------------------------------------------------
 
-
 using namespace websockets;
 
 // Tornado server --------------------------------------
@@ -90,22 +89,6 @@ void OnMessageCallback(WebsocketsMessage msg) {
   }
   else if (strcmp(msg_data, "s3") == 0) {
     SendSound(broadcastAddress, 3);
-  }
-}
-
-void onEventsCallback(WebsocketsEvent event, String data) {
-  if (event == WebsocketsEvent::ConnectionOpened) {
-    Serial.println("Connection Opened");
-  }
-  else if (event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println("Connection Closed");
-    esp_restart();
-  }
-  else if (event == WebsocketsEvent::GotPing) {
-    Serial.println("Got a Ping!");
-  }
-  else if (event == WebsocketsEvent::GotPong) {
-    Serial.println("Got a Pong!");
   }
 }
 // -----------------------------------------------------

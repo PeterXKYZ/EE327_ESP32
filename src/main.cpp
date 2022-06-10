@@ -38,13 +38,21 @@ bool cam_on = false;
 bool take_photo = false;
 
 // button stuff ---------------------------------------
-const int buttonPin = 15;
+const int buttonPin = 14;
 int pressed_curr = 0;
 int pressed_prev = 0;
 unsigned long button_time = 0;
 // 5 sec delay between consecutive button presses for anti-spam
 const size_t button_interval = 5000;  
 // -----------------------------------------------------
+
+
+// sensor stuff ----------------------------------------
+const int pirPin = 15;
+int pir_curr = 0;
+int pir_prev = 0;
+// -----------------------------------------------------
+
 
 
 // LED indication system -------------------------------
@@ -218,12 +226,19 @@ void setup() {
 
   // button stuff -----------------------------------
   pinMode(buttonPin, INPUT);
+  digitalWrite(buttonPin, LOW);
   // ------------------------------------------------
+  // pir stuff --------------------------------------
+  pinMode(pirPin, INPUT);
+  digitalWrite(pirPin, LOW);
+  // ------------------------------------------------
+
 }
 
 void loop() {
-  CheckConnection(wifiLED);
+  CheckConnection(wifiLED, false);
 
+  client.poll();
   if (!client.available()) {
     digitalWrite(wsLED, LOW);
     if (client.connect(host, port, path)) {
@@ -232,7 +247,6 @@ void loop() {
     } 
   }
 
-  client.poll();
   unsigned long curr_time = millis();
 
   // button stuff -----------------------------------
@@ -245,6 +259,16 @@ void loop() {
   }
   pressed_prev = pressed_curr;
   // ------------------------------------------------
+
+  // pir stuff --------------------------------------
+  pir_curr = digitalRead(pirPin);
+  if (pir_curr > pir_prev) {
+    Serial.println("Sensor triggered!");
+    client.send("pir");
+  }
+  pir_prev = pir_curr;
+  // ------------------------------------------------
+
 
   if (curr_time - prev_time > interval && cam_on) {
     prev_time = curr_time;
